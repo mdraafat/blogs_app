@@ -1,76 +1,118 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/auth/auth_event.dart';
+import '../blocs/blog/blog_bloc.dart';
+import '../blocs/blog/blog_event.dart';
+import '../blocs/blog/blog_state.dart';
+import '../services/blog_service.dart';
 import 'login_page.dart';
 import 'write_post_page.dart';
 import 'blog_detail_page.dart';
-import '../services/auth_email_service.dart';
-import '../services/blog_service.dart';
 
-class HomePage extends StatelessWidget {
+
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final blogService = BlogService();
+  State<HomePage> createState() => _HomePageState();
+}
 
+class _HomePageState extends State<HomePage> {
+  @override
+  void initState() {
+    super.initState();
+    context.read<BlogBloc>().add(const BlogLoadRequested());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          _buildAppBar(context),
-          StreamBuilder<List<BlogPost>>(
-            stream: blogService.getUserBlogs(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+          _AppBarSection(),
+          BlocBuilder<BlogBloc, BlogState>(
+            builder: (context, state) {
+              if (state is BlogLoading) {
                 return const SliverFillRemaining(
                   child: Center(child: CircularProgressIndicator()),
                 );
               }
 
-              if (snapshot.hasError) {
-                return SliverFillRemaining(
-                  child: Center(child: Text('Error: ${snapshot.error}')),
-                );
-              }
+              if (state is BlogLoaded) {
+                if (state.blogs.isEmpty) {
+                  return SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyState(),
+                  );
+                }
 
-              final blogs = snapshot.data ?? [];
-
-              if (blogs.isEmpty) {
-                return SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _buildEmptyState(context),
-                );
-              }
-
-              return SliverPadding(
-                padding: const EdgeInsets.all(16),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    final blog = blogs[index];
-                    return _BlogCard(
-                      blog: blog,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => BlogDetailPage(blog: blog),
-                          ),
+                return SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final blog = state.blogs[index];
+                        return _BlogCard(
+                          blog: blog,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => BlogDetailPage(blog: blog),
+                              ),
+                            );
+                          },
                         );
                       },
-                    );
-                  }, childCount: blogs.length),
-                ),
+                      childCount: state.blogs.length,
+                    ),
+                  ),
+                );
+              }
+
+              if (state is BlogError && state.blogs != null) {
+                return SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final blog = state.blogs![index];
+                        return _BlogCard(
+                          blog: blog,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => BlogDetailPage(blog: blog),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                      childCount: state.blogs!.length,
+                    ),
+                  ),
+                );
+              }
+
+              return const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
               );
             },
           ),
         ],
       ),
-      floatingActionButton: _buildFAB(context),
+      floatingActionButton: _FABSection(),
     );
   }
+}
 
-  Widget _buildAppBar(BuildContext context) {
-    final auth = EmailSignInService();
-
+class _AppBarSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
     return SliverAppBar(
       floating: true,
       pinned: true,
@@ -83,7 +125,7 @@ class HomePage extends StatelessWidget {
       ),
       actions: [
         CupertinoButton(
-          padding: EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           onPressed: () async {
             final shouldLogout = await showDialog<bool>(
               context: context,
@@ -108,15 +150,15 @@ class HomePage extends StatelessWidget {
 
             if (shouldLogout == true && context.mounted) {
               final navigator = Navigator.of(context);
-              await auth.signOut();
+              context.read<AuthBloc>().add(const AuthSignOutRequested());
               navigator.pushReplacement(
-                MaterialPageRoute(builder: (context) => const LoginPage()),
+                MaterialPageRoute(builder: (_) => const LoginPage()),
               );
             }
           },
-          child: Row(
+          child: const Row(
             mainAxisSize: MainAxisSize.min,
-            children: const [
+            children: [
               Icon(Icons.logout_sharp, size: 24),
               SizedBox(width: 4),
               Text('Sign Out', style: TextStyle(fontSize: 18)),
@@ -127,8 +169,11 @@ class HomePage extends StatelessWidget {
       ],
     );
   }
+}
 
-  Widget _buildEmptyState(BuildContext context) {
+class _EmptyState extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -154,8 +199,11 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildFAB(BuildContext context) {
+class _FABSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
     return CupertinoButton(
       padding: const EdgeInsets.all(16),
       color: Theme.of(context).colorScheme.primary,
@@ -163,7 +211,7 @@ class HomePage extends StatelessWidget {
       onPressed: () {
         Navigator.push(
           context,
-          CupertinoPageRoute(builder: (context) => const WritePostPage()),
+          CupertinoPageRoute(builder: (_) => const WritePostPage()),
         );
       },
       child: const Icon(
@@ -204,7 +252,7 @@ class _BlogCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              
+
               Row(
                 children: [
                   Expanded(

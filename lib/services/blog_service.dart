@@ -57,7 +57,8 @@ class BlogService {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        throw Exception('User not authenticated');
+        log('Error: User not authenticated');
+        return false;
       }
 
       await _firestore.collection('blogs').add({
@@ -67,6 +68,8 @@ class BlogService {
         'authorId': user.uid,  
         'createdAt': FieldValue.serverTimestamp(),
       });
+      
+      log('Blog published successfully');
       return true;
     } catch (e) {
       log('Error publishing blog: $e');
@@ -74,37 +77,57 @@ class BlogService {
     }
   }
 
-  
   Stream<List<BlogPost>> getUserBlogs() {
     final user = _auth.currentUser;
     if (user == null) {
+      log('Error: User not authenticated');
       return Stream.value([]);
     }
 
     return _firestore
         .collection('blogs')
-        .where('authorId', isEqualTo: user.uid)  
+        .where('authorId', isEqualTo: user.uid)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) => BlogPost.fromFirestore(doc)).toList();
+      log('Received ${snapshot.docs.length} blogs from Firestore');
+      final blogs = snapshot.docs.map((doc) => BlogPost.fromFirestore(doc)).toList();
+      blogs.sort((a, b) {
+        if (a.createdAt == null && b.createdAt == null) return 0;
+        if (a.createdAt == null) return 1;
+        if (b.createdAt == null) return -1;
+        return b.createdAt!.compareTo(a.createdAt!);
+      });
+      return blogs;
     });
   }
 
-  
   Future<bool> deleteBlog(String blogId) async {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        throw Exception('User not authenticated');
+        log('Error: User not authenticated');
+        return false;
       }
 
+      log('Attempting to delete blog: $blogId');
       
       final doc = await _firestore.collection('blogs').doc(blogId).get();
-      if (doc.data()?['authorId'] != user.uid) {
-        throw Exception('Unauthorized: You can only delete your own blogs');
+      
+      if (!doc.exists) {
+        log('Error: Blog document does not exist');
+        return false;
+      }
+
+      final authorId = doc.data()?['authorId'];
+      log('Blog authorId: $authorId, Current user: ${user.uid}');
+      
+      if (authorId != user.uid) {
+        log('Error: Unauthorized - user can only delete own blogs');
+        return false;
       }
 
       await _firestore.collection('blogs').doc(blogId).delete();
+      log('Blog deleted successfully: $blogId');
       return true;
     } catch (e) {
       log('Error deleting blog: $e');
@@ -112,7 +135,6 @@ class BlogService {
     }
   }
 
-  
   Future<bool> updateBlog({
     required String blogId,
     required String title,
@@ -122,13 +144,20 @@ class BlogService {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        throw Exception('User not authenticated');
+        log('Error: User not authenticated');
+        return false;
       }
 
-      
       final doc = await _firestore.collection('blogs').doc(blogId).get();
+      
+      if (!doc.exists) {
+        log('Error: Blog document does not exist');
+        return false;
+      }
+      
       if (doc.data()?['authorId'] != user.uid) {
-        throw Exception('Unauthorized: You can only update your own blogs');
+        log('Error: Unauthorized - user can only update own blogs');
+        return false;
       }
 
       await _firestore.collection('blogs').doc(blogId).update({
@@ -136,6 +165,8 @@ class BlogService {
         'subtitle': subtitle,
         'content': content,
       });
+      
+      log('Blog updated successfully');
       return true;
     } catch (e) {
       log('Error updating blog: $e');
